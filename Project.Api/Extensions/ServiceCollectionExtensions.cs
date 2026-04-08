@@ -1,7 +1,9 @@
 using System.Data;
-using System.Text;
 using Dapper;
 using FluentValidation;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.IdentityModel.Tokens;
+using Microsoft.OpenApi.Models;
 using Project.Application.Common;
 using Project.Application.DTOs;
 using Project.Application.Interfaces;
@@ -10,66 +12,75 @@ using Project.Domain.Entities;
 using Project.Infrastructure.Data;
 using Project.Infrastructure.Mapping;
 using Project.Infrastructure.Repositories;
-using Microsoft.AspNetCore.Authentication.JwtBearer;
-using Microsoft.IdentityModel.Tokens;
-using Microsoft.OpenApi.Models;
+using System.Text;
 
 namespace Project.Api.Extensions;
 
-
 public static class ServiceCollectionExtensions
 {
-
-
-    public static IServiceCollection AddInfrastructure(
-        this IServiceCollection services)
+    public static IServiceCollection AddInfrastructure(this IServiceCollection services)
     {
         DapperTypeMapRegistrar.Register(
-            typeof(Category),
+            typeof(Tenant),
+            typeof(Member),
             typeof(User),
-            typeof(PasswordResetToken)     
-        );
+            typeof(LoanProduct),
+            typeof(SavingsProduct),
+            typeof(ProductCategory),
+            typeof(Supplier),
+            typeof(Product),
+            typeof(Loan),
+            typeof(LoanInstallmentSchedule),
+            typeof(Sale),
+            typeof(PurchaseReceipt),
+            typeof(StockAdjustment),
+            typeof(PasswordResetToken));
 
         SqlMapper.AddTypeHandler(new DateOnlyTypeHandler());
         SqlMapper.AddTypeHandler(new TimeOnlyTypeHandler());
 
         services.AddScoped<IDbConnectionFactory, DbConnectionFactory>();
-        services.AddScoped<ICategoryRepository, CategoryRepository>();
         services.AddScoped<IUserRepository, UserRepository>();
+        services.AddScoped<IMemberRepository, MemberRepository>();
+        services.AddScoped<IMemberPortalRepository, MemberPortalRepository>();
+        services.AddScoped<ILoanProductRepository, LoanProductRepository>();
+        services.AddScoped<ISavingsProductRepository, SavingsProductRepository>();
+        services.AddScoped<ISavingsTransactionRepository, SavingsTransactionRepository>();
+        services.AddScoped<IInventoryRepository, InventoryRepository>();
+        services.AddScoped<ILoanRepository, LoanRepository>();
+        services.AddScoped<ISaleRepository, SaleRepository>();
+        services.AddScoped<IReportingRepository, ReportingRepository>();
         return services;
     }
 
-
-    public static IServiceCollection AddApplication(
-        this IServiceCollection services)
+    public static IServiceCollection AddApplication(this IServiceCollection services)
     {
         services.AddScoped<IAuthService, AuthService>();
-        services.AddScoped<ICategoryService, CategoryService>();
         services.AddScoped<IUserService, UserService>();
+        services.AddScoped<IMemberService, MemberService>();
+        services.AddScoped<IMemberPortalService, MemberPortalService>();
+        services.AddScoped<IRequestApprovalService, RequestApprovalService>();
+        services.AddScoped<ILoanProductService, LoanProductService>();
+        services.AddScoped<ISavingsProductService, SavingsProductService>();
+        services.AddScoped<ISavingsTransactionService, SavingsTransactionService>();
+        services.AddScoped<IInventoryService, InventoryService>();
+        services.AddScoped<ILoanService, LoanService>();
+        services.AddScoped<ISaleService, SaleService>();
+        services.AddScoped<IReportingService, ReportingService>();
         services.AddScoped<IJwtTokenService, JwtTokenService>();
-       
 
-        services.AddValidatorsFromAssemblyContaining<CreateUserRequestValidator>();
+        services.AddValidatorsFromAssemblyContaining<LoginRequestValidator>();
         return services;
     }
 
-    public static IServiceCollection AddApprovalNotifications(
-        this IServiceCollection services,
-        IConfiguration configuration)
+    public static IServiceCollection AddApprovalNotifications(this IServiceCollection services, IConfiguration configuration)
     {
-        services.Configure<ApprovalNotificationSettings>(
-            configuration.GetSection(ApprovalNotificationSettings.SectionName));
-        services.Configure<CronDispatchSettings>(
-            configuration.GetSection(CronDispatchSettings.SectionName));
-
+        services.Configure<ApprovalNotificationSettings>(configuration.GetSection(ApprovalNotificationSettings.SectionName));
+        services.Configure<CronDispatchSettings>(configuration.GetSection(CronDispatchSettings.SectionName));
         return services;
     }
 
-
-
-
-    public static IServiceCollection AddJwtAuthentication(
-        this IServiceCollection services, IConfiguration configuration)
+    public static IServiceCollection AddJwtAuthentication(this IServiceCollection services, IConfiguration configuration)
     {
         var jwtSettings = configuration.GetSection(JwtSettings.SectionName).Get<JwtSettings>()
             ?? throw new InvalidOperationException("JwtSettings section is missing from appsettings.json.");
@@ -91,45 +102,13 @@ public static class ServiceCollectionExtensions
                 ValidateIssuerSigningKey = true,
                 ValidIssuer = jwtSettings.Issuer,
                 ValidAudience = jwtSettings.Audience,
-                IssuerSigningKey = new SymmetricSecurityKey(
-                    Encoding.UTF8.GetBytes(jwtSettings.SecretKey)),
+                IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtSettings.SecretKey)),
                 ClockSkew = TimeSpan.Zero
             };
         });
 
         services.AddAuthorization();
-
         return services;
-    }
-
-    public class DateOnlyTypeHandler : SqlMapper.TypeHandler<DateOnly>
-    {
-        public override void SetValue(IDbDataParameter parameter, DateOnly value)
-            => parameter.Value = value.ToDateTime(TimeOnly.MinValue);
-
-        public override DateOnly Parse(object value)
-            => DateOnly.FromDateTime((DateTime)value);
-    }
-
-
-    public sealed class TimeOnlyTypeHandler : SqlMapper.TypeHandler<TimeOnly>
-    {
-        public override void SetValue(IDbDataParameter parameter, TimeOnly value)
-        {
-            parameter.DbType = DbType.Time;
-            parameter.Value = value.ToTimeSpan();
-        }
-
-        public override TimeOnly Parse(object value)
-        {
-            if (value is TimeSpan timeSpan)
-                return TimeOnly.FromTimeSpan(timeSpan);
-
-            if (value is DateTime dateTime)
-                return TimeOnly.FromDateTime(dateTime);
-
-            throw new DataException($"Cannot convert {value.GetType()} to TimeOnly");
-        }
     }
 
     public static IServiceCollection AddSwagger(this IServiceCollection services)
@@ -139,22 +118,34 @@ public static class ServiceCollectionExtensions
         {
             options.SwaggerDoc("v1", new OpenApiInfo
             {
-                Title = "Project Web API",
+                Title = "KSP POS Waserda API",
                 Version = "v1",
-                Description = "Project Management System REST API — .NET 9 + Dapper + SQL Server",
-                Contact = new OpenApiContact
-                {
-                    Name = "Project Team",
-                    Email = "project@team.com"
-                }
+                Description = "Cooperative KSP + POS Waserda REST API",
             });
-
-            var xmlFile = $"{System.Reflection.Assembly.GetExecutingAssembly().GetName().Name}.xml";
-            var xmlPath = Path.Combine(AppContext.BaseDirectory, xmlFile);
-            if (File.Exists(xmlPath))
-                options.IncludeXmlComments(xmlPath);
         });
 
         return services;
+    }
+
+    public sealed class DateOnlyTypeHandler : SqlMapper.TypeHandler<DateOnly>
+    {
+        public override void SetValue(IDbDataParameter parameter, DateOnly value) => parameter.Value = value.ToDateTime(TimeOnly.MinValue);
+        public override DateOnly Parse(object value) => DateOnly.FromDateTime((DateTime)value);
+    }
+
+    public sealed class TimeOnlyTypeHandler : SqlMapper.TypeHandler<TimeOnly>
+    {
+        public override void SetValue(IDbDataParameter parameter, TimeOnly value)
+        {
+            parameter.DbType = DbType.Time;
+            parameter.Value = value.ToTimeSpan();
+        }
+
+        public override TimeOnly Parse(object value) => value switch
+        {
+            TimeSpan timeSpan => TimeOnly.FromTimeSpan(timeSpan),
+            DateTime dateTime => TimeOnly.FromDateTime(dateTime),
+            _ => throw new DataException($"Cannot convert {value.GetType()} to TimeOnly")
+        };
     }
 }
